@@ -38,7 +38,10 @@ contract DealForTwoFactory is DealForTwoEnumerable {
 		if (!hashtagToken.transferFrom(msg.sender,this,_offerValue)){
 			throw;
 		}
-
+		// if deal already exists don't allow to overwrite it
+		if (deals[sha3(msg.sender,_dealid)].commissionValue != 0) {
+			throw;
+		}
 		// if it's funded - fill in the details
 		deals[sha3(msg.sender,_dealid)] = dealStruct(DealStatuses.Open,hashtag.commission(),_offerValue,0);
 
@@ -104,7 +107,10 @@ contract DealForTwoFactory is DealForTwoEnumerable {
 		bytes32 key = sha3(_dealowner,_dealid);
 		
 		dealStruct d = deals[key];
-
+                // only allow open deals to be funded
+		if (d.status != DealStatuses.Open) {
+			throw;
+		}
 		// if the provider is filled in - the deal was already funded
 		if (d.provider != 0x0){
 			throw;
