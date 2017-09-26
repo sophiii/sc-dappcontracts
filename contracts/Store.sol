@@ -1,6 +1,4 @@
-pragma solidity 0.4.11;
-
-
+pragma solidity ^0.4.11;
 import '../installed_contracts/zeppelin/contracts/ownership/Ownable.sol';
 import 'DealForTwoEnumerable.sol';
 import './IMiniMeToken.sol';
@@ -15,7 +13,6 @@ contract Store is Ownable, DealForTwoEnumerable  {
 		address provider;
 		uint itemIndex;
 		address buyer;
-		uint totalCost;
 		string deliveryAddress;
 		uint country;
 		uint date;
@@ -36,9 +33,9 @@ contract Store is Ownable, DealForTwoEnumerable  {
 	mapping (address => mapping( uint => uint)) deliveryChargePerGram;
         dealStruct[] public orders;
 
-	function Store(IHashtag _hashtag){
-		hashtag = _hashtag;
-		hashtagToken = IMiniMeToken(_hashtag.getTokenAddress());
+	function Store(address _hashtag){
+		hashtag = IHashtag(_hashtag);
+		hashtagToken = IMiniMeToken(hashtag.getTokenAddress());
 	}
 
 	function addItem(uint _price, uint _weight, string _IPFSData, address _deliveryFeeSchedual) {
@@ -47,7 +44,12 @@ contract Store is Ownable, DealForTwoEnumerable  {
 	}
 
 	function removeItem(uint i) {
-		delete Items[msg.sender][i];
+                uint lastElement = Items[msg.sender].length - 1;
+		Items[msg.sender][i]= Items[msg.sender][lastElement];
+                delete Items[msg.sender][lastElement];
+                if ( Items[msg.sender].length > 0 ) {
+	                Items[msg.sender].length-=1;
+		}
 	}
 
 	function updateDeliveryCharge(uint _countryCode, uint _price) onlyOwner {
@@ -59,11 +61,11 @@ contract Store is Ownable, DealForTwoEnumerable  {
 	function buy (address _provider, uint _itemIndex, 
 			string _deliverAddress, uint _country, uint quantity) {			
 		var item = Items[_provider][_itemIndex];
-		var totalCost = item.price * quantity + 
+		var dealValue = item.price * quantity + 
 				deliveryChargePerGram[item.deliveryFeeSchedual][_country] * item.weight * quantity;
-		require(hashtagToken.transferFrom(msg.sender,this,totalCost));
-		var order = dealStruct(DealStatuses.Open,0,0,_provider, _itemIndex, 
-					msg.sender, totalCost, _deliverAddress, _country, now );
+		require(hashtagToken.transferFrom(msg.sender,this,dealValue));
+		var order = dealStruct(DealStatuses.Open,0,dealValue,_provider, _itemIndex, 
+					msg.sender, _deliverAddress, _country, now );
 		orders.push(order);
 	}
 
@@ -74,7 +76,7 @@ contract Store is Ownable, DealForTwoEnumerable  {
 		require(msg.sender == order.buyer || now > order.date + 6 weeks);
 		require(order.status == DealStatuses.Open);
 		orders[i].status = DealStatuses.Done;	
-                require(hashtagToken.transfer(order.provider,order.totalCost));
+                require(hashtagToken.transfer(order.provider,order.dealValue));
 	}
 
 	function dispute (uint i) { 
@@ -100,6 +102,14 @@ contract Store is Ownable, DealForTwoEnumerable  {
 		orders[_dealid].status = DealStatuses.Resolved;
 	}
 
+	function getItem(address storeOwner, uint i) returns(uint, uint, string, address) {
+		return(Items[storeOwner][i].price, Items[storeOwner][i].weight, 
+			Items[storeOwner][i].IPFSData, Items[storeOwner][i].deliveryFeeSchedual);
+	}
 
-
+	function getOrder(uint i) returns(uint, uint, address, address, string, uint) {
+		return(orders[i].commissionValue, orders[i].dealValue
+			orders[i].provider, orders[i].buyer,
+			orders[i].deliveryAddress, orders[i].country);
+	}
 }
