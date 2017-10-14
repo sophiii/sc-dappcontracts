@@ -4,6 +4,7 @@ contract DealForTwoEnumerable {
 
    	enum DealStatuses {
     	Open,
+        Shipped, 
         Done,
         Disputed,
         Resolved,

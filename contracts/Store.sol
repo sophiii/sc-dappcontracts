@@ -16,6 +16,7 @@ contract Store is Ownable, DealForTwoEnumerable  {
 		string deliveryAddress;
 		uint country;
 		uint date;
+		string IPFSData;
 	}
 
 	struct Item {
@@ -30,6 +31,7 @@ contract Store is Ownable, DealForTwoEnumerable  {
 
 	mapping (address => Item[]) public Items; 
 	// numeric country code as Per ISO 3166-1
+
 	mapping (address => mapping( uint => uint)) deliveryChargePerGram;
         dealStruct[] public orders;
 
@@ -47,10 +49,11 @@ contract Store is Ownable, DealForTwoEnumerable  {
                 uint lastElement = Items[msg.sender].length - 1;
 		Items[msg.sender][i]= Items[msg.sender][lastElement];
                 delete Items[msg.sender][lastElement];
-                if ( Items[msg.sender].length > 0 ) {
-	                Items[msg.sender].length-=1;
-		}
 	}
+
+        function updateMetaData(uint i, string _metaData) {
+                Items[msg.sender][i].IPFSData = _metaData;
+        }
 
 	function updateDeliveryCharge(uint _countryCode, uint _price) onlyOwner {
 		require(deliveryChargePerGram[msg.sender][_countryCode] != 0);
@@ -58,31 +61,43 @@ contract Store is Ownable, DealForTwoEnumerable  {
 		deliveryChargePerGram[msg.sender][_countryCode] = _price;
 	}
 
-	function buy (address _provider, uint _itemIndex, 
+	function buy(address _provider, uint _itemIndex, 
 			string _deliverAddress, uint _country, uint quantity) {			
 		var item = Items[_provider][_itemIndex];
 		var dealValue = item.price * quantity + 
 				deliveryChargePerGram[item.deliveryFeeSchedual][_country] * item.weight * quantity;
 		require(hashtagToken.transferFrom(msg.sender,this,dealValue));
 		var order = dealStruct(DealStatuses.Open,0,dealValue,_provider, _itemIndex, 
-					msg.sender, _deliverAddress, _country, now );
+					msg.sender, _deliverAddress, _country, now, item.IPFSData );
 		orders.push(order);
 	}
 
-	function delivered (uint i) {
+        function deliveryStarted(uint i) {
+                var order = orders[i];
+                //before 6 weeks only buyer can payout
+                //after 6 weeks let anyone pay out. 
+                require(msg.sender == order.provider);
+                require(order.status == DealStatuses.Open);
+                orders[i].status = DealStatuses.Shipped;
+        } 
+
+
+	function delivered(uint i) {
 		var order = orders[i];
 		//before 6 weeks only buyer can payout
 		//after 6 weeks let anyone pay out. 
+                // REP
 		require(msg.sender == order.buyer || now > order.date + 6 weeks);
-		require(order.status == DealStatuses.Open);
+		require(order.status == DealStatuses.Shipped ||  order.status == DealStatuses.Open);
 		orders[i].status = DealStatuses.Done;	
                 require(hashtagToken.transfer(order.provider,order.dealValue));
 	}
 
-	function dispute (uint i) { 
+	function dispute(uint i) { 
 		var order = orders[i];
+                //negitive rep
 		require(msg.sender == order.buyer || msg.sender == order.provider);
-		require(order.status == DealStatuses.Open);
+		require(order.status == DealStatuses.Open ||  order.status == DealStatuses.Shipped);
 		orders[i].status = DealStatuses.Disputed;
 	}
 	
@@ -92,13 +107,11 @@ contract Store is Ownable, DealForTwoEnumerable  {
 		require(msg.sender == hashtag.getConflictResolver());
 		// only disputed deals can be resolved
 		require(d.status == DealStatuses.Disputed);
-
 		// send the seeker fraction back to the dealowner
 		require(hashtagToken.transfer(_dealowner,_seekerFraction));
-
 		// send the remaining deal value back to the provider
 		require(hashtagToken.transfer(d.provider,d.dealValue - _seekerFraction));
-
+                // burn rep
 		orders[_dealid].status = DealStatuses.Resolved;
 	}
 
@@ -107,9 +120,10 @@ contract Store is Ownable, DealForTwoEnumerable  {
 			Items[storeOwner][i].IPFSData, Items[storeOwner][i].deliveryFeeSchedual);
 	}
 
-	function getOrder(uint i) returns(uint, uint, address, address, string, uint) {
+	function getOrder(uint i) returns(uint, uint, address, address, string, uint, DealForTwoEnumerable.DealStatuses) {
 		return(orders[i].commissionValue, orders[i].dealValue
 			orders[i].provider, orders[i].buyer,
-			orders[i].deliveryAddress, orders[i].country);
+			orders[i].deliveryAddress, orders[i].country
+			orders[i].status); //ipfs metadata
 	}
 }

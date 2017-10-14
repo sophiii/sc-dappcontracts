@@ -5,6 +5,16 @@ var Hashtag = artifacts.require("./Hashtag.sol");
 var DealForTwo = artifacts.require("./DealForTwo.sol");
 var DealForTwoFactory = artifacts.require("./DealForTwoFactory.sol");
 var Store = artifacts.require("./Store.sol");
+var store;
+
+var orderStates = {
+        "Open" : 0,
+        "Shipped": 1,
+        "Done": 2,
+        "Disputed": 3,
+        "Resolved": 4,
+        "Canceled": 5
+        }
 
 function checkItem(res,price, weight, ipfs, fee, cb) { 
   assert.equal(res[0].toString(), price.toString(), "price should be "+price);
@@ -14,10 +24,21 @@ function checkItem(res,price, weight, ipfs, fee, cb) {
   cb();
 };
 
-contract('Store', function(accounts) {
+function checkOrder(i, expected, cb) {
+  store.getOrder.call(i).then(function (res) {
+    assert.equal(res[0].toString(), expected[0], "price should be "+expected[0])
+    assert.equal(res[1].toString(), expected[1], "price should be "+expected[1])
+    assert.equal(res[2], expected[2], "provider should be ")
+    assert.equal(res[3], expected[3], "buyer should be ")
+    assert.equal(res[4].toString(), expected[4], "delivery address should be ")
+    assert.equal(res[5].toString(), expected[5], "country address should be ")      
+    assert.equal(res[6].toString(), expected[6], "status should change "+ res[6].toString())
+    cb();
+  });
+}
 
+contract('Store', function(accounts) {
   var swtToken;
-  var store;
   var snapshot;
   var hashtagRepToken;
   var miniMeTokenFactory;
@@ -25,6 +46,9 @@ contract('Store', function(accounts) {
   var dealContract;
   var hashtagcommission = 2;
   var gasStats = [];
+  //ROLES
+  var ConflictResolver = accounts[3];
+
 
   var self = this;
 
@@ -77,7 +101,7 @@ contract('Store', function(accounts) {
       // commission for this hastag is hashtagcommission SWT
       Hashtag.new(swtToken.address, miniMeTokenFactory.address, "pioneer", hashtagcommission, "QmNogiets", {
         gas: 4700000,
-        from: accounts[3]
+        from: ConflictResolver
       }).then(function(instance) {
         hashtagContract = instance;
         assert.isNotNull(hashtagContract);
@@ -130,7 +154,6 @@ contract('Store', function(accounts) {
 
     it("should see that our store is whitelisted for this hashtag", function(done) {
       hashtagContract.validFactories.call(store.address).then(function(result) {
-        console.log(result);
         assert.equal(result, true, "dealForTwoFactory not whitelisted...");
         done();
       });
@@ -140,38 +163,32 @@ contract('Store', function(accounts) {
   });
 
   describe ( 'add and remove items', function () {
-    it("should add an item", function (done) {
+    it("should add first item", function (done) {
         store.addItem(new BigNumber(1),new BigNumber(1),"asdf", 0x0, {from:accounts[0], gas:400000}).then(function(res) {
-          store.Items.call(accounts[0], 0).then(function(res) {
-            console.log(res[0], res[1], res[2], res[3]);
+          store.Items.call(accounts[0], 0).then(function(res) {         
             checkItem(res,1, 1,"asdf", 0x0,done)
           });
         });
     });
-
-    it("should delete item", function (done) {
-       store.removeItem(0).then(function(res) {
-         store.Items.call(accounts[0], 0).then(function(res) {
-           console.log(res);
-           done();
+    it("should add second item", function (done) {
+        store.addItem(new BigNumber(2),new BigNumber(2),"asdf", 0x0, {from:accounts[0], gas:400000}).then(function(res) {
+          store.Items.call(accounts[0], 1).then(function(res) {
+            checkItem(res,2, 2,"asdf", 0x0,done)
+          });
+        });
+    });
+    it("should delete second item", function (done) {
+       store.removeItem(1).then(function(res) {
+         store.Items.call(accounts[0], 1).then(function(res) {      
            checkItem(res,new BigNumber(0), new BigNumber(0),"",0x0,done)
          });
        });
     });
   });
-/*
-  describe( 'sell and buy' , function () { 
-    it("should add an item", function (done) {
-        store.addItem(2,2,"asdf", 0x0, {from:accounts[0], gas:400000}).then(function(res) {
-          store.Items.call(accounts[0], 1).then(function(res) {
-            console.log(res[0], res[1], res[2], res[3]);
-            checkItem(res,new BigNumber(2), new BigNumber(2),"asdf", 0x0,done)
-          });
-        });
-    });
 
+  describe( 'Buy happy path ' , function () { 
     it("should give seeker allowance to store", function(done) {
-      swtToken.approve(store.address, 1, {
+      swtToken.approve(store.address, 2, {
         from: accounts[1]
       }).then(function(res) {
         console.log('gas used:', res.receipt.gasUsed);
@@ -187,340 +204,73 @@ contract('Store', function(accounts) {
     it("should buy the item", function (done) {
         store.buy(accounts[0],0, "affas",0,1,
                    {from:accounts[1], gas:400000}).then(function(res) {
-          store.getOrder.call(0).then(function(res) {
-            console.log(res);
-            assert.equal(res[0].toString(), 0, "price should be "+0)
-            assert.equal(res[1].toString(), 1, "price should be "+1)
-            assert.equal(res[2], accounts[0], "provider should be ")
-            assert.equal(res[3], accounts[1], "buyer should be ")
-            assert.equal(res[4], "affas", "delivery address should be ")
-            assert.equal(res[5], 0, "country address should be ")
+          checkOrder(0, [0,1,accounts[0], accounts[1], "affas", 0, orderStates["Open"]], function () {
+            store.getOrder.call(0).then(function(res) {            
             //take snaptshot
-//            web3.currentProvider.sendAsync({
-//                           jsonrpc: "2.0",method: "evm_snapshot"}, function(err, result) {
-//                             snapshot = result.result;
-                             done();
-//            });
+            //  web3.currentProvider.sendAsync({
+            //                 jsonrpc: "2.0",method: "evm_snapshot", params:[snapshot]}, function(err) {
+                               done();
+            //  });
+            });
           });
         });
     });
 
-    it("should accept the order was delivered", function ( done) { 
-//        store.buy(accounts[0], 1,0,"",0,0,{from:accounts[1], gas:4000000}).then(function (res) {
-//          store.buy(accounts[0],0, "affas",0,1,
-//                   {from:accounts[2], gas:4000000}).then(function(res) {
-//            console.log(res);
-            done();
-//          }); 
+    it("should accept the order was shipped", function ( done) { 
+          store.deliveryStarted(0,{from:accounts[0], gas:4000000}).then(function(res) {
+	    checkOrder(0, [0,1,accounts[0], accounts[1], "affas", 0, orderStates["Shipped"]],done);           
+          }); 
+    }); 
+
+    it("should accept the order was recived", function ( done) {
+          store.delivered(0,{from:accounts[1], gas:4000000}).then(function(res) {
+            checkOrder(0, [0,1,accounts[0], accounts[1], "affas", 0, orderStates["Done"]],done);           
+          });
     });
   });    
-*/
 
-/*
-  describe('SimpleDeal happy flow', function() {
+  
+  describe( 'Buy dispute path' , function () {
 
-    it("should give seeker allowance to dealfortwo", function(done) {
-      swtToken.approve(dealForTwoFactory.address, 10, {
-        from: accounts[1]
-      }).then(function(res) {
-        console.log('gas used:', res.receipt.gasUsed);
-        gasStats.push({
-          name: 'approve (seeker)',
-          gasUsed: res.receipt.gasUsed
+/*    before("should restore old state", function (done) {
+      //restore snapshot
+      web3.currentProvider.sendAsync({
+        jsonrpc: "2.0",method: "evm_revert"}, function(err, result) {
+        console.log(result, err);
+        checkOrder(0, [0,1,accounts[0], accounts[1], "affas", 0, 0],done);
+      });
+    });*/
+    var shippedOrder = 1;
+    it("should buy the item", function (done) {
+        store.buy(accounts[0],0, "affas",0,1,
+                   {from:accounts[1], gas:400000}).then(function(res) {
+          checkOrder(shippedOrder, [0,1,accounts[0], accounts[1], "affas", 0, orderStates["Open"]], function () {
+            store.getOrder.call(0).then(function(res) {
+              done();
+            });
+          });
         });
-        done();
+    });
+
+    it("should accept the order was shipped", function ( done) {
+      store.deliveryStarted(shippedOrder,{from:accounts[0], gas:4000000}).then(function(res) {
+        checkOrder(shippedOrder, [0,1,accounts[0], accounts[1], "affas", 0,orderStates["Shipped"]], done);
       });
     });
 
-    it("should create a new deal", function(done) {
-      dealForTwoFactory.makeDealForTwo("TheDeal", 10,"", {
-        from: accounts[1],
-        gas: 4700000
-      }).then(function(res) {
-        console.log('gas used:', res.receipt.gasUsed);
-        gasStats.push({
-          name: 'makeDealForTwo',
-          gasUsed: res.receipt.gasUsed
-        });
-        done();
+    it("should dispute order", function ( done) {
+      store.dispute(shippedOrder,{from:accounts[1], gas:4000000}).then(function(res) {
+        checkOrder(shippedOrder, [0,1,accounts[0], accounts[1], "affas", 0, orderStates["Disputed"]],done);
+      });
+    }); 
+
+    it("should resolve dispute", function (done) {
+      store.resolve(shippedOrder,accounts[2],1,"rulig",  {from:ConflictResolver, gas:400000}).then(function(res) {
+        checkOrder(shippedOrder, [0,1,accounts[0], accounts[1], "affas", 0, orderStates["Resolved"]],done);
       });
     });
 
-    it("should see token balance decreased on seeker's account", function(done) {
-      swtToken.balanceOf(accounts[1]).then(function(balance) {
-        assert.equal(balance.toNumber(), 90, "deal balance not correct after funding");
-        console.log('Balance of accounts[1] =', balance.toNumber());
-        done();
-      });
-    });
+  }); 
 
-    it("should see token balance on dealfortwofactory", function(done) {
-      swtToken.balanceOf(dealForTwoFactory.address).then(function(balance) {
-        assert.equal(balance.toNumber(), 10, "deal balance not correct after funding");
-        console.log('Balance of dealForTwoFactory =', balance.toNumber());
-        done();
-      });
-    });
-
-
-    it("should give provider allowance to dealfortwo", function(done) {
-      swtToken.approve(dealForTwoFactory.address, 10, {
-        from: accounts[2]
-      }).then(function(res) {
-        console.log('gas used:', res.receipt.gasUsed);
-        gasStats.push({
-          name: 'approve (provider)',
-          gasUsed: res.receipt.gasUsed
-        });
-        done();
-      });
-    });
-
-
-    it("should execute fundDeal", function(done) {
-      dealForTwoFactory.fundDeal("TheDeal", accounts[1], 10,"", {
-        from: accounts[2],
-        gas: 4700000
-      }).then(function(res) {
-        console.log('gas used:', res.receipt.gasUsed);
-        gasStats.push({
-          name: 'fundDeal',
-          gasUsed: res.receipt.gasUsed
-        });
-        done();
-      });
-    });
-
-
-    it("should see token balance decreased on provider's account", function(done) {
-      swtToken.balanceOf(accounts[2]).then(function(balance) {
-        assert.equal(balance.toNumber(), 290, "deal balance not correct after funding");
-        console.log('Balance of accounts[2] =', balance.toNumber());
-        done();
-      });
-    });
-
-    it("should see token balance on dealfortwofactory", function(done) {
-      swtToken.balanceOf(dealForTwoFactory.address).then(function(balance) {
-        assert.equal(balance.toNumber(), 20, "deal balance not correct after funding");
-        console.log('Balance of dealForTwoFactory =', balance.toNumber());
-        done();
-      });
-    });
-
-
-    it("should approve the deal", function(done) {
-      dealForTwoFactory.payout("TheDeal","", {
-        from: accounts[1],
-        gas: 4700000
-      }).then(function(res) {
-        console.log('gas used:', res.receipt.gasUsed);
-        gasStats.push({
-          name: 'payout',
-          gasUsed: res.receipt.gasUsed
-        });
-        done();
-      });
-    });
-
-
-    it("should see the balance of the DealForTwoFactory is correct", function(done) {
-      swtToken.balanceOf(dealForTwoFactory.address).then(function(balance) {
-        assert.equal(balance.toNumber(), 0, " balance not correct");
-        console.log('Balance of account=', balance.toNumber());
-        done();
-      });
-    });
-
-    it("should see the payout on the provider's account", function(done) {
-      swtToken.balanceOf(accounts[2]).then(function(balance) {
-        assert.equal(balance.toNumber(), 300 + 10 - 2, " balance not correct");
-        console.log('Balance of account=', balance.toNumber());
-        done();
-      });
-    });
-
-    it("should see the payout of the commision on the hashtag owner's account", function(done) {
-      swtToken.balanceOf(accounts[3]).then(function(balance) {
-        assert.equal(balance.toNumber(), 2, " balance not correct");
-        console.log('Balance of account=', balance.toNumber());
-        done();
-      });
-    });
-
-    it("should see REP on accounts[1]", function(done) {
-      hashtagRepToken.balanceOf(accounts[1]).then(function(balance) {
-        assert.equal(balance, 5, "accounts[1] REP balance not correct");
-        console.log('Balance of account=', balance.toNumber());
-        done();
-      });
-    });
-
-    it("should see REP on accounts[2]", function(done) {
-      hashtagRepToken.balanceOf(accounts[2]).then(function(balance) {
-        assert.equal(balance, 5, "accounts[2] REP balance not correct");
-        console.log('Balance of account=', balance.toNumber());
-        done();
-      });
-    });
-  });
-  describe('Stats', function() {
-    it("should show stats of Happy Flow", function(done) {
-      var cumulatedGas = 0;
-      for (var i = 0; i < gasStats.length; i++) {
-        console.log(gasStats[i]);
-        cumulatedGas += gasStats[i].gasUsed;
-      }
-      console.log('Total gas used', cumulatedGas);
-      done();
-    });
-  });
-
-
-  describe('DealForTwo that doesn\'t exist error-logic', function() {
-
-    it("create a new deal without an allowance should throw", function(done) {
-      dealForTwoFactory.makeDealForTwo("TheDeal2", 10, {
-        from: accounts[1],
-        gas: 4700000
-      }).then(function(res) {
-        assert.fail(null, null, 'this function should throw', e);
-        done();
-      }).catch(function(e) {
-        done();
-      });
-    });
-
-    it("approve a non-existing deal should throw", function(done) {
-      dealForTwoFactory.fundDeal("TheDeal3", accounts[1], 10, {
-        from: accounts[2],
-        gas: 4700000
-      }).then(function(res) {
-        assert.fail(null, null, 'this function should throw', e);
-        done();
-      }).catch(function(e) {
-        done();
-      });
-    });
-
-    it("payout a non-existing deal should throw", function(done) {
-      dealForTwoFactory.payout("TheDeal3", {
-        from: accounts[1],
-        gas: 4700000
-      }).then(function(res) {
-        assert.fail(null, null, 'this function should throw', e);
-        done();
-      }).catch(function(e) {
-        done();
-      });
-    });
-  });
-
-
-  describe('DealForTwo in wrong order', function() {
-
-    it("should give seeker allowance to dealfortwo", function(done) {
-      swtToken.approve(dealForTwoFactory.address, 10, {
-        from: accounts[1]
-      }).then(function(res) {
-        console.log('gas used:', res.receipt.gasUsed);
-        gasStats.push({
-          name: 'approve (seeker)',
-          gasUsed: res.receipt.gasUsed
-        });
-        done();
-      });
-    });
-
-    it("create a new deal should work", function(done) {
-      dealForTwoFactory.makeDealForTwo("TheDeal4", 10,"", {
-        from: accounts[1],
-        gas: 4700000
-      }).then(function(res) {
-        done();
-      }).catch(function(e) {
-        assert.fail(null, null, 'this function should not throw', e);
-        done();
-      });
-    });
-
-    it("fund an existing deal but wit no allowance should throw", function(done) {
-      dealForTwoFactory.fundDeal("TheDeal4", accounts[1], 10, "",{
-        from: accounts[2],
-        gas: 4700000
-      }).then(function(res) {
-        assert.fail(null, null, 'this function should throw', e);
-        done();
-      }).catch(function(e) {
-        done();
-      });
-    });
-
-    it("payout a non-funded deal should throw", function(done) {
-      dealForTwoFactory.payout("TheDeal4","", {
-        from: accounts[1],
-        gas: 4700000
-      }).then(function(res) {
-        assert.fail(null, null, 'this function should throw', e);
-        done();
-      }).catch(function(e) {
-        done();
-      });
-    });
-  });
-
-
-  describe('DealForTwo in wrong order', function() {
-
-    it("should give seeker allowance to dealfortwo", function(done) {
-      swtToken.approve(dealForTwoFactory.address, 10, {
-        from: accounts[1]
-      }).then(function(res) {
-        console.log('gas used:', res.receipt.gasUsed);
-        gasStats.push({
-          name: 'approve (seeker)',
-          gasUsed: res.receipt.gasUsed
-        });
-        done();
-      });
-    });
-
-    it("create a new deal that could never cover the commission should throw", function(done) {
-      dealForTwoFactory.makeDealForTwo("TheDeal5", 10, "",{
-        from: accounts[1],
-        gas: 4700000
-      }).then(function(res) {
-        done();
-      }).catch(function(e) {
-        assert.fail(null, null, 'this function should not throw', e);
-        done();
-      });
-    });
-
-    it("fund an existing deal but with no allowance should throw", function(done) {
-      dealForTwoFactory.fundDeal("TheDeal4", accounts[1], 10, "",{
-        from: accounts[2],
-        gas: 4700000
-      }).then(function(res) {
-        assert.fail(null, null, 'this function should throw', e);
-        done();
-      }).catch(function(e) {
-        done();
-      });
-    });
-
-    it("payout a non-funded deal should throw", function(done) {
-      dealForTwoFactory.payout("TheDeal4","", {
-        from: accounts[1],
-        gas: 4700000
-      }).then(function(res) {
-        assert.fail(null, null, 'this function should throw', e);
-        done();
-      }).catch(function(e) {
-        done();
-      });
-    });
-  });
-*/
 
 });
